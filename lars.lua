@@ -332,7 +332,7 @@ local function deserialize(bytecode: string): Prototype
 	local stm = newStream(bytecode)
 
 	-- check header
-  -- TODO: support more formats
+	-- TODO: support more formats
 	assert(readString(stm, 4) == "\27Lua",  "invalid bytecode signature")
 	assert(read(stm) == 0x51,               "invalid bytecode version")
 	assert(read(stm) == 0x00,               "invalid bytecode format")
