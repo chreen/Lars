@@ -1,0 +1,8 @@
+[package]
+name = "chreen/lars"
+description = "Lua 5.1 bytecode interpreter written in Luau"
+version = "0.1.0"
+license = "MIT"
+authors = ["chreen <https://github.com/chreen>"]
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
