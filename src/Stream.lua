@@ -25,7 +25,7 @@ end
 
 function Stream:readPattern(pattern: string): ...any
   local ret = table.pack(string.unpack(self:getEndianPattern() .. pattern, self.source, self.index))
-  self.index += table.remove(ret, ret.n) :: number - 1
+  self.index = table.remove(ret, ret.n)
 
   return table.unpack(ret)
 end
@@ -35,11 +35,11 @@ function Stream:readByte(): number
 end
 
 function Stream:readUInt32(): number
-  return self:readPattern("H") :: number
+  return self:readPattern("I4") :: number
 end
 
 function Stream:readInt32(): number
-  return self:readPattern("h") :: number
+  return self:readPattern("i4") :: number
 end
 
 function Stream:readUInt64(): number
