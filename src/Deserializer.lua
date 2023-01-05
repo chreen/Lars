@@ -76,6 +76,8 @@ function Deserializer:readConstant(): Definitions.Constant
   return cons
 end
 
+--- Read a Lua prototype and its children
+---@return Definitions.Prototype proto Resulting prototype
 function Deserializer:readPrototype(): Definitions.Prototype
   local source = self:readString() :: string -- good job luau
 
@@ -163,6 +165,8 @@ function Deserializer:readPrototype(): Definitions.Prototype
   }
 end
 
+--- Read a Lua local variable
+---@return Definitions.Local local Resulting local variable
 function Deserializer:readLocal(): Definitions.Local
   return {
     name = self:readString(),
@@ -171,6 +175,8 @@ function Deserializer:readLocal(): Definitions.Local
   }
 end
 
+--- Deserialize bytecode into a Chunk
+---@return Definitions.Chunk chunk Resulting chunk
 function Deserializer:deserialize(): Definitions.Chunk
   return {
     signature = self._signature,
@@ -178,6 +184,10 @@ function Deserializer:deserialize(): Definitions.Chunk
   }
 end
 
+--- Creates a new deserializer with the given bytecode string.
+--- Will verify bytecode signature and error if incompatible.
+---@param bytecode string Bytecode string
+---@return Deserializer deserializer Resulting deserializer
 function Deserializer.new(bytecode: string): Deserializer
   local stream = Stream.new(bytecode)
 
