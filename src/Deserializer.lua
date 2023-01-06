@@ -1,4 +1,4 @@
---!strict
+-- no strict mode, string.unpack causes issues with proto return
 
 local Definitions = require(script.Parent:WaitForChild("Definitions"))
 local Stream = require(script.Parent:WaitForChild("Stream"))
@@ -12,10 +12,10 @@ export type Deserializer = {
   _patternCache: { [string]: string },
 
   readInt: (Deserializer) -> number,
-  readString: (Deserializer) -> string,
-  readInstruction: (Deserializer) -> Definitions.Instruction,
-  readConstant: (Deserializer) -> Definitions.Constant,
+  readInstructions: (Deserializer) -> { Definitions.Instruction },
+  readConstant: (Deserializer) -> { Definitions.Constant },
   readPrototype: (Deserializer) -> Definitions.Prototype,
+  readLocals: (Deserializer) -> { Definitions.Local },
   deserialize: (Deserializer) -> Definitions.Chunk,
 } & typeof(setmetatable({}, {}))
 
@@ -25,83 +25,83 @@ function Deserializer:readInt(): number
   return self._stream:readPattern(self._patternCache["int"])
 end
 
---- Read a string with the size_t size from the signature
----@return string string Resulting string
-function Deserializer:readString(): string
-  return string.sub(self._stream:readPattern(self._patternCache["string"]), 1, -2)
-end
+--- Read a list of unsigned 32-bit instructions, then extract all possible fields
+---@return array instructions Resulting array of instructions
+function Deserializer:readInstructions(): { Definitions.Instruction }
+  local sizeCode = self:readInt()
+  local code = table.create(sizeCode)
 
---- Read an unsigned 32-bit instruction, then extract every possible field
----@return Definitions.Instruction instruction Resulting Lua instruction
-function Deserializer:readInstruction(): Definitions.Instruction
-  local raw = self._stream:readUInt32()
+  local raws = { self._stream:readPattern(string.rep("I4", sizeCode)) }
+  for _, raw in ipairs(raws) do
+    local ins = {
+      raw = raw,
+      op = bit32.extract(raw, 0, 6),
+      A = bit32.extract(raw, 6, 8),
+      C = bit32.extract(raw, 14, 9),
+      B = bit32.extract(raw, 23, 9),
+      Bx = bit32.extract(raw, 14, 18),
+      sBx = bit32.extract(raw, 14, 18) - 131071,
 
-  local ins = {
-    raw = raw,
-    op = bit32.extract(raw, 0, 6),
-    A = bit32.extract(raw, 6, 8),
-    C = bit32.extract(raw, 14, 9),
-    B = bit32.extract(raw, 23, 9),
-    Bx = bit32.extract(raw, 14, 18),
-    sBx = bit32.extract(raw, 14, 18) - 131071,
+      kB = nil,
+      kC = nil,
+    }
 
-    kB = nil,
-    kC = nil,
-  }
+    ins.isRkB = Definitions.bOpArgK[ins.op] and ins.B > 0xFF or false
+    ins.isRkC = Definitions.cOpArgK[ins.op] and ins.C > 0xFF or false
 
-  ins.isRkB = Definitions.bOpArgK[ins.op] and ins.B > 0xFF or false
-  ins.isRkC = Definitions.cOpArgK[ins.op] and ins.C > 0xFF or false
-
-  return ins
-end
-
---- Read a Lua constant from the stream
----@return Definitions.Constant constant Resulting Lua constant
-function Deserializer:readConstant(): Definitions.Constant
-  local typeByte = self._stream:readByte()
-  local cons: Definitions.Constant = {
-    type = assert(Definitions.constantTypes[typeByte], "Invalid constant type " .. typeByte),
-  }
-
-  if typeByte == 1 then -- LUA_TBOOLEAN
-    cons.value = self._stream:readByte() ~= 0
-  elseif typeByte == 3 then -- LUA_TNUMBER
-    cons.value = self._stream:readPattern(self._patternCache["number"])
-  elseif typeByte == 4 then -- LUA_TSTRING
-    cons.value = self:readString()
-  else -- LUA_TNIL
-    cons.value = nil
+    table.insert(code, ins)
   end
 
-  return cons
+  return code
+end
+
+--- Read a list of Lua constants
+---@return array constants Resulting array of constants
+function Deserializer:readConstants(): { Definitions.Constant }
+  local sizeCons = self:readInt()
+  local consts = table.create(sizeCons)
+
+  for _ = 1, sizeCons do
+    local typeByte = self._stream:readPattern("B")
+    local cons: Definitions.Constant = {
+      type = assert(Definitions.constantTypes[typeByte], "Invalid constant type " .. typeByte),
+    }
+
+    if typeByte == 1 then -- LUA_TBOOLEAN
+      cons.value = self._stream:readByte() ~= 0
+    elseif typeByte == 3 then -- LUA_TNUMBER
+      cons.value = self._stream:readPattern(self._patternCache["number"])
+    elseif typeByte == 4 then -- LUA_TSTRING
+      cons.value = string.sub(self._stream:readPattern(self._patternCache["string"]), 1, -2)
+    else -- LUA_TNIL
+      cons.value = nil
+    end
+
+    table.insert(consts, cons)
+  end
+
+  return consts
 end
 
 --- Read a Lua prototype and its children
 ---@return Definitions.Prototype proto Resulting prototype
 function Deserializer:readPrototype(): Definitions.Prototype
-  local source = self:readString() :: string -- good job luau
+  -- read basic proto data
+  local source: string, firstLine, lastLine, numUpvals, numParams, varargFlag, stackSize =
+    self._stream:readPattern(self._patternCache["prototype"])
 
-  if #source == 0 then
+  -- fix source name
+  if source == "\0" then
     source = "@Lars"
+  else
+    source = string.sub(source, 1, -2) :: string
   end
-
-  local firstLine, lastLine = self:readInt(), self:readInt()
-
-  local numUpvals, numParams, varargFlag, stackSize = self._stream:readPattern("BBBB")
 
   -- read instructions
-  local sizeCode = self:readInt()
-  local code = table.create(sizeCode)
-  for _ = 1, sizeCode do
-    table.insert(code, self:readInstruction())
-  end
+  local code = self:readInstructions()
 
   -- read constants
-  local sizeK = self:readInt()
-  local consts = table.create(sizeK)
-  for _ = 1, sizeK do
-    table.insert(consts, self:readConstant())
-  end
+  local consts = self:readConstants()
 
   -- preload constants to instructions
   for _, inst: Definitions.Instruction in ipairs(code) do
@@ -128,23 +128,20 @@ function Deserializer:readPrototype(): Definitions.Prototype
 
   -- read line numbers
   local sizeLines = self:readInt()
-  local lines = table.create(sizeLines)
-  for _ = 1, sizeLines do
-    table.insert(lines, self:readInt())
-  end
+  local linePattern = string.rep(self._patternCache["int"], sizeLines)
+  local lines = { self._stream:readPattern(linePattern) }
 
   -- read local variables
-  local sizeLocals = self:readInt()
-  local locals = table.create(sizeLocals)
-  for _ = 1, sizeLocals do
-    table.insert(locals, self:readLocal())
-  end
+  local locals = self:readLocals()
 
   -- read upvalue names
-  local sizeUpvalues = self:readInt()
-  local upvalues = table.create(sizeUpvalues)
-  for _ = 1, sizeUpvalues do
-    table.insert(upvalues, self:readString())
+  local sizeUpvals = self:readInt()
+  local upvalPattern = string.rep(self._patternCache["string"], sizeUpvals)
+  local upvalues = { self._stream:readPattern(upvalPattern) }
+
+  -- remove trailing \0
+  for i, upval in ipairs(upvalues) do
+    upvalues[i] = string.sub(upval, 1, -2)
   end
 
   -- package final prototype
@@ -166,13 +163,21 @@ function Deserializer:readPrototype(): Definitions.Prototype
 end
 
 --- Read a Lua local variable
----@return Definitions.Local local Resulting local variable
-function Deserializer:readLocal(): Definitions.Local
-  return {
-    name = self:readString(),
-    startPc = self:readInt(),
-    endPc = self:readInt(),
-  }
+---@return array locals Resulting array of local variables
+function Deserializer:readLocals(): { Definitions.Local }
+  local sizeVar = self:readInt()
+  local vars = table.create(sizeVar)
+
+  for _ = 1, sizeVar do
+    local name, startPc, endPc = self._stream:readPattern(self._patternCache["local"])
+    table.insert(vars, {
+      name = string.sub(name, 1, -2),
+      startPc = startPc,
+      endPc = endPc,
+    })
+  end
+
+  return vars
 end
 
 --- Deserialize bytecode into a Chunk
@@ -215,13 +220,20 @@ function Deserializer.new(bytecode: string): Deserializer
   }
 
   -- set stream's endianness
-  stream.littleEndian = signature.endian
+  stream.endian = if signature.endian then "<" else ">"
 
   -- cache certain patterns
   local patternCache = {}
   patternCache["int"] = "I" .. sizeInt
   patternCache["string"] = "s" .. sizeSizeT
   patternCache["number"] = if sizeNumber == 4 then "f" else "d"
+  patternCache["prototype"] = patternCache["string"] -- source name
+    .. patternCache["int"] -- first line defined
+    .. patternCache["int"] -- last line defined
+    .. "BBBB" -- upvalue count, param count, vararg flag, stack size
+  patternCache["local"] = patternCache["string"] -- variable name
+    .. patternCache["int"] -- start PC
+    .. patternCache["int"] -- end PC
 
   local self = {
     _stream = stream,
