@@ -19,6 +19,16 @@ export type Deserializer = {
   deserialize: (Deserializer) -> Definitions.Chunk,
 } & typeof(setmetatable({}, {}))
 
+-- from lobject.c, converts a "floating point byte" back into an integer
+local function fb2int(x: number): number
+  local e = bit32.band(bit32.rshift(x, 3), 31)
+  if e == 0 then
+    return x
+  else
+    return bit32.lshift(bit32.band(x, 7) + 8, e - 1)
+  end
+end
+
 --- Read an integer with the size from the signature
 ---@return number int Resulting integer
 function Deserializer:readInt(): number
@@ -116,6 +126,10 @@ function Deserializer:readPrototype(): Definitions.Prototype
 
     if inst.isRkC then
       inst.kC = consts[inst.C - 0xFF].value
+    end
+
+    if inst.op == 10 then -- decode NEWTABLE array size
+      inst.kB = fb2int(inst.B) -- set array size as a constant for the VM to use later
     end
   end
 
