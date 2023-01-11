@@ -12,10 +12,10 @@ export type Deserializer = {
   _patternCache: { [string]: string },
 
   readInt: (Deserializer) -> number,
-  readInstructions: (Deserializer) -> { Definitions.Instruction },
-  readConstant: (Deserializer) -> { Definitions.Constant },
-  readPrototype: (Deserializer) -> Definitions.Prototype,
-  readLocals: (Deserializer) -> { Definitions.Local },
+  readInstructions: (Deserializer, Definitions.Prototype) -> { Definitions.Instruction },
+  readConstant: (Deserializer, Definitions.Prototype) -> { Definitions.Constant },
+  readPrototype: (Deserializer, Definitions.Prototype?) -> Definitions.Prototype,
+  readLocals: (Deserializer, Definitions.Prototype) -> { Definitions.Local },
   deserialize: (Deserializer) -> Definitions.Chunk,
 } & typeof(setmetatable({}, {}))
 
@@ -36,14 +36,16 @@ function Deserializer:readInt(): number
 end
 
 --- Read a list of unsigned 32-bit instructions, then extract all possible fields
+---@param parent Definitions.Prototype Parent prototype
 ---@return array instructions Resulting array of instructions
-function Deserializer:readInstructions(): { Definitions.Instruction }
+function Deserializer:readInstructions(parent: Definitions.Prototype): { Definitions.Instruction }
   local sizeCode = self:readInt()
   local code = table.create(sizeCode)
 
   local raws = { self._stream:readPattern(string.rep("I4", sizeCode)) }
   for _, raw in ipairs(raws) do
     local ins = {
+      parent = parent,
       raw = raw,
       op = bit32.extract(raw, 0, 6),
       A = bit32.extract(raw, 6, 8),
@@ -66,14 +68,16 @@ function Deserializer:readInstructions(): { Definitions.Instruction }
 end
 
 --- Read a list of Lua constants
+---@param parent Definitions.Prototype Parent prototype
 ---@return array constants Resulting array of constants
-function Deserializer:readConstants(): { Definitions.Constant }
+function Deserializer:readConstants(parent: Definitions.Prototype): { Definitions.Constant }
   local sizeCons = self:readInt()
   local consts = table.create(sizeCons)
 
   for _ = 1, sizeCons do
     local typeByte = self._stream:readPattern("B")
     local cons: Definitions.Constant = {
+      parent = parent,
       type = assert(Definitions.constantTypes[typeByte], "Invalid constant type " .. typeByte),
     }
 
@@ -94,8 +98,9 @@ function Deserializer:readConstants(): { Definitions.Constant }
 end
 
 --- Read a Lua prototype and its children
+---@param parent Definitions.Prototype? Parent prototype
 ---@return Definitions.Prototype proto Resulting prototype
-function Deserializer:readPrototype(): Definitions.Prototype
+function Deserializer:readPrototype(parent: Definitions.Prototype?): Definitions.Prototype
   -- read basic proto data
   local source: string, firstLine, lastLine, numUpvals, numParams, varargFlag, stackSize =
     self._stream:readPattern(self._patternCache["prototype"])
@@ -107,11 +112,24 @@ function Deserializer:readPrototype(): Definitions.Prototype
     source = string.sub(source, 1, -2) :: string
   end
 
+  local proto = {
+    parent = parent,
+    source = source,
+    firstLine = firstLine,
+    lastLine = lastLine,
+    numUpvals = numUpvals,
+    numParams = numParams,
+    isVararg = varargFlag,
+    stackSize = stackSize,
+  }
+
   -- read instructions
-  local code = self:readInstructions()
+  local code = self:readInstructions(proto)
+  proto.code = code
 
   -- read constants
-  local consts = self:readConstants()
+  local consts = self:readConstants(proto)
+  proto.consts = consts
 
   -- preload constants to instructions
   for _, inst: Definitions.Instruction in ipairs(code) do
@@ -137,16 +155,17 @@ function Deserializer:readPrototype(): Definitions.Prototype
   local sizeP = self:readInt()
   local protos = table.create(sizeP)
   for _ = 1, sizeP do
-    table.insert(protos, self:readPrototype())
+    table.insert(protos, self:readPrototype(proto))
   end
+  proto.protos = protos
 
   -- read line numbers
   local sizeLines = self:readInt()
   local linePattern = string.rep(self._patternCache["int"], sizeLines)
-  local lines = { self._stream:readPattern(linePattern) }
+  proto.lines = { self._stream:readPattern(linePattern) }
 
   -- read local variables
-  local locals = self:readLocals()
+  proto.locals = self:readLocals()
 
   -- read upvalue names
   local sizeUpvals = self:readInt()
@@ -158,33 +177,22 @@ function Deserializer:readPrototype(): Definitions.Prototype
     upvalues[i] = string.sub(upval, 1, -2)
   end
 
-  -- package final prototype
-  return {
-    source = source,
-    firstLine = firstLine,
-    lastLine = lastLine,
-    numUpvals = numUpvals,
-    numParams = numParams,
-    isVararg = varargFlag,
-    stackSize = stackSize,
-    code = code,
-    consts = consts,
-    protos = protos,
-    lines = lines,
-    locals = locals,
-    upvalues = upvalues,
-  }
+  proto.upvalues = upvalues
+
+  return proto
 end
 
 --- Read a Lua local variable
+---@param parent Definitions.Prototype Parent prototype
 ---@return array locals Resulting array of local variables
-function Deserializer:readLocals(): { Definitions.Local }
+function Deserializer:readLocals(parent: Definitions.Prototype): { Definitions.Local }
   local sizeVar = self:readInt()
   local vars = table.create(sizeVar)
 
   for _ = 1, sizeVar do
     local name, startPc, endPc = self._stream:readPattern(self._patternCache["local"])
     table.insert(vars, {
+      parent = parent,
       name = string.sub(name, 1, -2),
       startPc = startPc,
       endPc = endPc,
@@ -230,7 +238,7 @@ function Deserializer.new(bytecode: string): Deserializer
     size_t = sizeSizeT,
     instruction = sizeInstruction,
     lua_Number = sizeNumber,
-    integral = integral ~= 1,
+    integral = integral == 1,
   }
 
   -- set stream's endianness

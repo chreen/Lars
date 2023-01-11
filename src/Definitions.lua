@@ -24,6 +24,7 @@ export type ConstantType = "LUA_TNIL" | "LUA_TBOOLEAN" | "LUA_TNUMBER" | "LUA_TS
 export type ConstantValue = nil | boolean | number | string
 
 export type Prototype = {
+  parent: Prototype?,
   source: string,
   firstLine: number,
   lastLine: number,
@@ -40,6 +41,7 @@ export type Prototype = {
 }
 
 export type Instruction = {
+  parent: Prototype,
   raw: number,
   op: number,
   A: number,
@@ -55,11 +57,13 @@ export type Instruction = {
 }
 
 export type Constant = {
+  parent: Prototype,
   type: ConstantType,
   value: ConstantValue,
 }
 
 export type Local = {
+  parent: Prototype,
   name: string,
   startPc: number,
   endPc: number,
