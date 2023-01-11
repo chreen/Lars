@@ -106,9 +106,7 @@ function Deserializer:readPrototype(parent: Definitions.Prototype?): Definitions
     self._stream:readPattern(self._patternCache["prototype"])
 
   -- fix source name
-  if source == "\0" then
-    source = "@Lars"
-  else
+  if #source > 0 then
     source = string.sub(source, 1, -2) :: string
   end
 
