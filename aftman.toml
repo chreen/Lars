@@ -5,5 +5,5 @@
 [tools]
 rojo = "rojo-rbx/rojo@7.2.1"
 selene = "Kampfkarren/selene@0.22.0"
-StyLua = "JohnnyMorganz/StyLua@0.15.2"
+StyLua = "JohnnyMorganz/StyLua@0.16.0"
 wally = "UpliftGames/wally@0.3.1"

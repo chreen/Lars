@@ -1,6 +1,6 @@
 repos:
 - repo: https://github.com/JohnnyMorganz/StyLua
-  rev: v0.15.2
+  rev: v0.16.0
   hooks:
   - id: stylua-system
 - repo: https://github.com/pre-commit/pre-commit-hooks
