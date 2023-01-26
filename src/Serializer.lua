@@ -47,7 +47,7 @@ function Serializer:writeConstants(consts: { Definitions.Constant })
     elseif const.type == "LUA_TNUMBER" then
       self._stream:writePattern(self._patternCache["number"], const.value)
     elseif const.type == "LUA_TSTRING" then
-      self._stream:writePattern(self._patternCache["string"], const.value .. "\0")
+      self._stream:writePattern(self._patternCache["string"], `{const.value}\0`)
     end
   end
 end
@@ -58,7 +58,7 @@ function Serializer:writePrototype(proto: Definitions.Prototype)
   -- write basic proto data
   self._stream:writePattern(
     self._patternCache["prototype"],
-    (if #proto.source > 0 then proto.source .. "\0" else proto.source),
+    (if #proto.source > 0 then `{proto.source}\0` else proto.source),
     proto.firstLine,
     proto.lastLine,
     proto.numUpvals,
@@ -89,7 +89,7 @@ function Serializer:writePrototype(proto: Definitions.Prototype)
   -- write upvalue names
   self:writeInt(#proto.upvalues)
   for _, upval in ipairs(proto.upvalues) do
-    self._stream:writePattern(self._patternCache["string"], upval .. "\0")
+    self._stream:writePattern(self._patternCache["string"], `{upval}\0`)
   end
 end
 
@@ -99,7 +99,7 @@ function Serializer:writeLocals(locals: { Definitions.Local })
   self:writeInt(#locals)
 
   for _, var in ipairs(locals) do
-    self._stream:writePattern(self._patternCache["local"], var.name .. "\0", var.startPc, var.endPc)
+    self._stream:writePattern(self._patternCache["local"], `{var.name}\0`, var.startPc, var.endPc)
   end
 end
 
@@ -151,16 +151,11 @@ function Serializer.new(chunk: Definitions.Chunk): Serializer
 
   -- cache certain patterns
   local patternCache = {}
-  patternCache["int"] = "I" .. chunk.signature.int
-  patternCache["string"] = "s" .. chunk.signature.size_t
+  patternCache["int"] = `I{chunk.signature.int}`
+  patternCache["string"] = `s{chunk.signature.size_t}`
   patternCache["number"] = if chunk.signature.lua_Number == 4 then "f" else "d"
-  patternCache["prototype"] = patternCache["string"] -- source name
-    .. patternCache["int"] -- first line defined
-    .. patternCache["int"] -- last line defined
-    .. "BBBB" -- upvalue count, param count, vararg flag, stack size
-  patternCache["local"] = patternCache["string"] -- variable name
-    .. patternCache["int"] -- start PC
-    .. patternCache["int"] -- end PC
+  patternCache["prototype"] = `{patternCache["string"]}{patternCache["int"]}{patternCache["int"]}BBBB`
+  patternCache["local"] = `{patternCache["string"]}{patternCache["int"]}{patternCache["int"]}`
 
   local self = {
     _stream = stream,

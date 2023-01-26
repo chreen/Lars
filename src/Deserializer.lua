@@ -78,7 +78,7 @@ function Deserializer:readConstants(parent: Definitions.Prototype): { Definition
     local typeByte = self._stream:readPattern("B")
     local cons: Definitions.Constant = {
       parent = parent,
-      type = assert(Definitions.constantTypes[typeByte], "Invalid constant type " .. typeByte),
+      type = assert(Definitions.constantTypes[typeByte], `Invalid constant type {typeByte}`),
     }
 
     if typeByte == 1 then -- LUA_TBOOLEAN
@@ -244,16 +244,11 @@ function Deserializer.new(bytecode: string): Deserializer
 
   -- cache certain patterns
   local patternCache = {}
-  patternCache["int"] = "I" .. sizeInt
-  patternCache["string"] = "s" .. sizeSizeT
+  patternCache["int"] = `I{sizeInt}`
+  patternCache["string"] = `s{sizeSizeT}`
   patternCache["number"] = if sizeNumber == 4 then "f" else "d"
-  patternCache["prototype"] = patternCache["string"] -- source name
-    .. patternCache["int"] -- first line defined
-    .. patternCache["int"] -- last line defined
-    .. "BBBB" -- upvalue count, param count, vararg flag, stack size
-  patternCache["local"] = patternCache["string"] -- variable name
-    .. patternCache["int"] -- start PC
-    .. patternCache["int"] -- end PC
+  patternCache["prototype"] = `{patternCache["string"]}{patternCache["int"]}{patternCache["int"]}BBBB`
+  patternCache["local"] = `{patternCache["string"]}{patternCache["int"]}{patternCache["int"]}`
 
   local self = {
     _stream = stream,
